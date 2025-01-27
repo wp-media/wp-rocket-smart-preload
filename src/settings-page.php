@@ -1,12 +1,6 @@
 <?php
-/*
-Plugin Name: WP Rocket - Smart Preload
-Description: Smart Preload for WP Rocket Plugin
-Version: 1.0
-Author: Your Name
-*/
 
-function wp_rocket_settings_page()
+function wp_rocket_smart_preload_settings_page()
 {
     $urls_to_always_include = get_option('rsp_pages_to_always_include', []);
     $sitemap_page_limit = get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
@@ -138,7 +132,6 @@ add_action('admin_post_save_wp_rocket_smart_preload_settings', 'save_wp_rocket_s
 
 function rsp_admin_menu()
 {
-    add_options_page('WP Rocket - Smart Preload', 'WP Rocket - Smart Preload', 'manage_options', 'wp-rocket-smart-preload', 'wp_rocket_settings_page');
+    add_options_page('WP Rocket - Smart Preload', 'WP Rocket - Smart Preload', 'manage_options', 'wp-rocket-smart-preload', 'wp_rocket_smart_preload_settings_page');
 }
 add_action('admin_menu', 'rsp_admin_menu');
-?>
