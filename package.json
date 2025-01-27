@@ -1,0 +1,17 @@
+{
+    "name": "wp-rocket-smart-preload",
+    "version": "1.0.0",
+    "description": "Smart preload for WP Rocket",
+    "type": "module",
+    "scripts": {
+        "build:release": "node ./build-release.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "esbuild": "^0.24.2",
+        "rimraf": "^6.0.1",
+        "typescript": "^5.7.3"
+    }
+}
