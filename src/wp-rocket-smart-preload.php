@@ -251,6 +251,7 @@ function rsp_uninstall_plugin()
     rsp_remove_scheduled_tasks();
     rsp_prepare_preload_things_for_custom_sitemap(true);
     rsp_remove_database_options();
+    rsp_remove_transients();
     flush_rewrite_rules();
 }
 register_deactivation_hook(__FILE__, 'rsp_deactivate_plugin');
@@ -261,7 +262,21 @@ function rsp_remove_database_options()
     delete_option('rsp_sitemap_page_limit');
     delete_option('rsp_deactivate_ip_protection');
 }
-
+/**
+ * Removes transients related to WP Rocket - Smart Preload.
+ *
+ * This function is responsible for clearing any transients that are used
+ * by the WP Rocket - Smart Preload plugin.
+ *
+ * @return void
+ * @since 1.0.2
+ * @author Sandy Figueroa
+ */
+function rsp_remove_transients()
+{
+    delete_transient('rsp_wp_rocket_deactivated_notice');
+    delete_transient('rsp_most_visited_pages');
+}
 /**
  * Function hooked to the deactivation hook to run necessary clean up tasks.
  *
