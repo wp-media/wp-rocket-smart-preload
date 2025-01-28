@@ -117,7 +117,7 @@ function save_wp_rocket_smart_preload_settings()
     }
 
     // Sanitize IP Protection
-    $ip_protection = isset($_POST['ip-protection']) ? '1' : '0';
+    $ip_protection = isset($_POST['ip-protection']) ? '0' : '1';
 
     // Save settings
     update_option('rsp_pages_to_always_include', $urls);
