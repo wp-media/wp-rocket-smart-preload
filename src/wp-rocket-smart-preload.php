@@ -64,7 +64,9 @@ add_filter('rsp_database_table_cleanup_frequency', function ($cleanup_frequency)
 add_filter('rsp_update_preload_table_frequency', function ($update_preload_table_frequency) {
     return $update_preload_table_frequency; // Edit this to change the frequency of the task that updates the preload table. (Possible values: hourly, twicedaily, daily, weekly) Refer to: https://developer.wordpress.org/reference/functions/wp_get_schedules/
 }, 0);
-add_filter('rsp_deactivate_ip_protection', '__return_zero', 0); // Set to true to deactivate the IP protection feature. (This feature prevents the same IP from recording visits too frequently). In case the plugin cannot get the real IP of the user, it makes sense to deactivate this feature.
+add_filter('rsp_deactivate_ip_protection', function ($deactivate_ip_protection) {
+    return $deactivate_ip_protection; // Edit this (return true) to deactivate the IP protection feature. (This feature prevents counting fake visits due to multiple page refreshes from the same IP address)
+}, 0);
 // STOP EDITING
 
 
@@ -351,7 +353,7 @@ function rsp_record_visit()
     if ($existing_visit) {
         $last_visit_time = strtotime($existing_visit->last_visit);
         $current_time = current_time('timestamp');
-        $deactivate_ip_protection = apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0));
+        $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
         // Update last visit timestamp and increment visit count if over an hour since last visit (or if IP protection is deactivated)
         if ($deactivate_ip_protection || (($current_time - $last_visit_time) > RSP_IP_PROTECTION_TIME_THRESHOLD)) {
             $wpdb->update(
