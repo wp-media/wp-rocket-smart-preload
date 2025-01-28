@@ -305,6 +305,10 @@ add_action('wp_enqueue_scripts', 'rsp_enqueue_scripts');
  */
 function rsp_enqueue_scripts()
 {
+    // prevent loading on admin, ajax and 404 pages
+    if (is_admin() || wp_doing_ajax() || is_404()) {
+        return;
+    }
     wp_enqueue_script('rsp-tracker', plugin_dir_url(__FILE__) . 'assets/js/rsp-tracker.js', [], RSP_PLUGIN_VERSION, ['strategy' => 'defer', 'in_footer' => true]);
     wp_localize_script('rsp-tracker', 'rsp_ajax', [
         'ajax_url' => admin_url('admin-ajax.php'),
