@@ -37,6 +37,10 @@ if (!defined('RSP_SITEMAP_LOCATION')) {
 }
 require_once 'constants.php';
 require_once 'settings-page.php';
+require_once 'inc/bot_filter.php';
+
+use function WP_Rocket_Smart_Preload\Utils\Bot_Filter\is_bot;
+
 /**
  * SAFE TO EDIT FILTERS
  */
@@ -347,7 +351,10 @@ add_action('wp_ajax_rsp_record_visit', 'rsp_record_visit');
 function rsp_record_visit()
 {
     global $wpdb;
-
+    // Bail if it's a bot
+    if (is_bot($_SERVER['HTTP_USER_AGENT'])) {
+        wp_send_json_error('Skipping bot visit');
+    }
     // Verify nonce
     if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'rsp_record_visit_nonce')) {
         wp_send_json_error('Invalid nonce');
