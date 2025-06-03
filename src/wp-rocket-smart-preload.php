@@ -667,6 +667,35 @@ function vaidate_accepted_frequencies($value)
     $accepted_values = ['hourly', 'twicedaily', 'daily', 'weekly'];
     return in_array($value, $accepted_values, true) ? $value : 'daily';
 }
+
+/**
+ * Applies Smart Preload to the Remove Unused CSS (RUCSS) process.
+ *
+ * Prevents the URL to be added to RUCSS table
+ *
+ * @since 1.2.0
+ *
+ * @return void
+ */
+function apply_to_rucss()
+{
+    if (!is_admin() || !wp_doing_ajax() || !is_404()) {
+        return;
+    }
+    $apply_rucss = (bool) apply_filters('rsp_apply_rucss', get_option('rsp_apply_rucss', 0));
+    if (!$apply_rucss) {
+        return;
+    }
+    $url =  untrailingslashit("{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}");
+    $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
+    $sitemap_page_limit = validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
+    $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
+    if (! in_array($url, $urls_to_preload, true)) {
+        add_filter('pre_get_rocket_option_remove_unused_css', '__return_zero');
+    }
+}
+add_action('wp', __NAMESPACE__ . '\apply_to_rucss');
+
 /**
  * TODO
  * - Implement:
