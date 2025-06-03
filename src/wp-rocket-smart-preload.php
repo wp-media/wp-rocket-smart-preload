@@ -71,6 +71,9 @@ add_filter('rsp_update_preload_table_frequency', function ($update_preload_table
 add_filter('rsp_deactivate_ip_protection', function ($deactivate_ip_protection) {
     return $deactivate_ip_protection; // Edit this (return true) to deactivate the IP protection feature. (This feature prevents counting fake visits due to multiple page refreshes from the same IP address)
 }, 0);
+add_filter('rsp_apply_rucss', function ($apply_rucss) {
+    return $apply_rucss; // Edit this (return true) to apply the Remove Unused CSS feature to the most visited pages.
+}, 0);
 // STOP EDITING
 
 
@@ -265,6 +268,7 @@ function rsp_remove_database_options()
     delete_option('rsp_pages_to_always_include');
     delete_option('rsp_sitemap_page_limit');
     delete_option('rsp_deactivate_ip_protection');
+    delete_option('rsp_apply_rucss');
 }
 /**
  * Removes transients related to WP Rocket - Smart Preload.

@@ -5,6 +5,7 @@ function wp_rocket_smart_preload_settings_page()
     $urls_to_always_include = get_option('rsp_pages_to_always_include', []);
     $sitemap_page_limit = get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
     $deactivate_ip_protection = get_option('rsp_deactivate_ip_protection', 0);
+    $apply_rucss = get_option('rsp_apply_rucss', 0);
 ?>
     <div class="wrap">
         <h2>WP Rocket - Smart Preload Settings</h2>
@@ -12,6 +13,19 @@ function wp_rocket_smart_preload_settings_page()
             <?php wp_nonce_field('save_settings', 'wp_rocket_nonce'); ?>
 
             <table class="form-table">
+                <tr valign="top">
+                    <th scope="row">Apply to Remove Unused CSS</th>
+                    <td>
+                        <label class="switch">
+                            <input type="checkbox" id="apply-rucss" name="apply-rucss" <?php checked($apply_rucss, '1'); ?>>
+                            <span class="slider round"></span>
+                        </label>
+                        <p class="description">Enable to also limit Remove Unused CSS to be applied to the most visited pages.
+                            <br>
+                            <strong>Note:</strong> Home page URL is always included.
+                        </p>
+                    </td>
+                </tr>
                 <tr valign="top">
                     <th scope="row">Always Preload These URLs</th>
                     <td>
@@ -118,11 +132,12 @@ function save_wp_rocket_smart_preload_settings()
 
     // Sanitize IP Protection
     $ip_protection = isset($_POST['ip-protection']) ? '0' : '1';
-
+    $apply_rucss = isset($_POST['apply-rucss']) ? '1' : '0';
     // Save settings
     update_option('rsp_pages_to_always_include', $urls);
     update_option('rsp_sitemap_page_limit', $url_limit);
     update_option('rsp_deactivate_ip_protection', $ip_protection);
+    update_option('rsp_apply_rucss', $apply_rucss);
 
     // Redirect back to the settings page
     $redirect_url = add_query_arg('page', 'wp-rocket-smart-preload', admin_url('options-general.php'));
