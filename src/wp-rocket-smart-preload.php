@@ -671,7 +671,7 @@ function vaidate_accepted_frequencies($value)
 /**
  * Applies Smart Preload to the Remove Unused CSS (RUCSS) process.
  *
- * Prevents the URL to be added to RUCSS table
+ * Prevents the URL to be added to RUCSS table if not a part of the most visited pages.
  *
  * @since 1.2.0
  *
