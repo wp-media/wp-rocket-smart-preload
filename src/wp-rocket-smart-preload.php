@@ -675,27 +675,27 @@ function vaidate_accepted_frequencies($value)
  *
  * @since 1.2.0
  *
- * @return void
+ * @return int
  */
-function apply_to_rucss()
+function rsp_apply_to_rucss($value)
 {
     if (!is_admin() || !wp_doing_ajax() || !is_404()) {
-        return;
+        return $value;
     }
     $apply_rucss = (bool) apply_filters('rsp_apply_rucss', get_option('rsp_apply_rucss', 0));
     if (!$apply_rucss) {
-        return;
+        return $value;
     }
     $url =  untrailingslashit("{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}");
     $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
     $sitemap_page_limit = validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
     $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
     if (! in_array($url, $urls_to_preload, true)) {
-        add_filter('pre_get_rocket_option_remove_unused_css', '__return_zero');
+        return 0;
     }
+    return $value;
 }
-add_action('wp', __NAMESPACE__ . '\apply_to_rucss');
-
+add_filter('pre_get_rocket_option_remove_unused_css', 'rsp_apply_to_rucss');
 /**
  * TODO
  * - Implement:
