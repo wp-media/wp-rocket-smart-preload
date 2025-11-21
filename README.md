@@ -79,3 +79,7 @@ Create a [new release](https://github.com/wp-media/wp-rocket-smart-preload/relea
 * Make the `Release title` the same as the tag (v2.1.0, for example)
 * Include a description about the changes applied in the update
 * Attach the new zip file so it can be downloaded as part of the release
+
+## Author
+
+Sandy Figueroa: [Github](https://github.com/sandyfzu)
