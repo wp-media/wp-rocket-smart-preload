@@ -71,6 +71,9 @@ add_filter('rsp_update_preload_table_frequency', function ($update_preload_table
 add_filter('rsp_deactivate_ip_protection', function ($deactivate_ip_protection) {
     return $deactivate_ip_protection; // Edit this (return true) to deactivate the IP protection feature. (This feature prevents counting fake visits due to multiple page refreshes from the same IP address)
 }, 0);
+add_filter('rsp_apply_rucss', function ($apply_rucss) {
+    return $apply_rucss; // Edit this (return true) to apply the Remove Unused CSS feature to the most visited pages.
+}, 0);
 // STOP EDITING
 
 
@@ -265,6 +268,7 @@ function rsp_remove_database_options()
     delete_option('rsp_pages_to_always_include');
     delete_option('rsp_sitemap_page_limit');
     delete_option('rsp_deactivate_ip_protection');
+    delete_option('rsp_apply_rucss');
 }
 /**
  * Removes transients related to WP Rocket - Smart Preload.
@@ -663,6 +667,35 @@ function vaidate_accepted_frequencies($value)
     $accepted_values = ['hourly', 'twicedaily', 'daily', 'weekly'];
     return in_array($value, $accepted_values, true) ? $value : 'daily';
 }
+
+/**
+ * Applies Smart Preload to the Remove Unused CSS (RUCSS) process.
+ *
+ * Prevents the URL to be added to RUCSS table if not a part of the most visited pages.
+ *
+ * @since 1.2.0
+ *
+ * @return int
+ */
+function rsp_apply_to_rucss($value)
+{
+    if (!is_admin() || !wp_doing_ajax() || !is_404()) {
+        return $value;
+    }
+    $apply_rucss = (bool) apply_filters('rsp_apply_rucss', get_option('rsp_apply_rucss', 0));
+    if (!$apply_rucss) {
+        return $value;
+    }
+    $url =  untrailingslashit("{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}");
+    $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
+    $sitemap_page_limit = validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
+    $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
+    if (! in_array($url, $urls_to_preload, true)) {
+        return 0;
+    }
+    return $value;
+}
+add_filter('pre_get_rocket_option_remove_unused_css', 'rsp_apply_to_rucss');
 /**
  * TODO
  * - Implement:
