@@ -679,7 +679,7 @@ function rsp_process_cleanup_batch()
     );
 
     // If there are more records to delete, schedule the next batch, until $affected_rows is 0
-    if ($affected_rows > 0 && !wp_next_scheduled('rsp_batch_cleanup_task')) {
+    if ($affected_rows > 0) {
         wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
     }
 }
