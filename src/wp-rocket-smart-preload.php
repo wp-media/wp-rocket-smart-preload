@@ -211,6 +211,7 @@ function rsp_fire_activation_hook_tasks()
         last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         visit_count BIGINT UNSIGNED DEFAULT 1,
         PRIMARY KEY (id),
+        KEY last_visit (last_visit),
         UNIQUE KEY unique_visit (page_url(255), user_ip)
     ) $charset_collate;";
 
@@ -352,7 +353,7 @@ function rsp_record_visit()
 {
     global $wpdb;
     // Bail if it's a bot
-    if (is_bot($_SERVER['HTTP_USER_AGENT'])) {
+    if (is_bot($_SERVER['HTTP_USER_AGENT'] ?? '')) {
         wp_send_json_error('Skipping bot visit');
     }
     // Verify nonce
@@ -371,39 +372,35 @@ function rsp_record_visit()
     $user_ip = rsp_get_user_ip();
     $table_name = RSP_PLUGIN_TABLE;
 
-    // Check if a record exists
-    $existing_visit = $wpdb->get_row(
-        $wpdb->prepare("SELECT * FROM $table_name WHERE page_url = %s AND user_ip = %s", $page_url, $user_ip)
+    // Single-statement upsert to reduce DB load (vs. SELECT + UPDATE/INSERT).
+    // Returns affected_rows: 1 (insert), 2 (updated), 0 (duplicate but no-op => too early).
+    $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
+    $now_mysql = current_time('mysql');
+
+    $query = $wpdb->prepare(
+        "INSERT INTO $table_name (page_url, user_ip, last_visit, visit_count)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE
+                visit_count = visit_count + IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, 1, 0),
+                last_visit = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, %s, last_visit)",
+        $page_url,
+        $user_ip,
+        $now_mysql,
+        $deactivate_ip_protection ? 1 : 0,
+        $now_mysql,
+        (int) RSP_IP_PROTECTION_TIME_THRESHOLD,
+        $deactivate_ip_protection ? 1 : 0,
+        $now_mysql,
+        (int) RSP_IP_PROTECTION_TIME_THRESHOLD,
+        $now_mysql
     );
 
-    if ($existing_visit) {
-        $last_visit_time = strtotime($existing_visit->last_visit);
-        $current_time = current_time('timestamp');
-        $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
-        // Update last visit timestamp and increment visit count if over an hour since last visit (or if IP protection is deactivated)
-        if ($deactivate_ip_protection || (($current_time - $last_visit_time) > RSP_IP_PROTECTION_TIME_THRESHOLD)) {
-            $wpdb->update(
-                $table_name,
-                [
-                    'last_visit' => current_time('mysql'),
-                    'visit_count' => $existing_visit->visit_count + 1
-                ],
-                ['id' => $existing_visit->id]
-            );
-        } else {
-            wp_send_json_error('Visit not recorded. Too early to record a new visit from the same IP.');
-        }
-    } else {
-        // Insert new visit record
-        $wpdb->insert(
-            $table_name,
-            [
-                'page_url' => $page_url,
-                'user_ip' => $user_ip,
-                'last_visit' => current_time('mysql'),
-                'visit_count' => 1
-            ]
-        );
+    $affected_rows = $wpdb->query($query);
+    if (false === $affected_rows) {
+        wp_send_json_error('Database error');
+    }
+    if (0 === $affected_rows) {
+        wp_send_json_error('Visit not recorded. Too early to record a new visit from the same IP.');
     }
 
     wp_send_json_success('Visit recorded');
@@ -428,9 +425,24 @@ function rsp_get_most_visited($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT, $urls_on
     global $wpdb;
     $table_name = RSP_PLUGIN_TABLE;
 
+    // Limit the aggregation to the same retention window used by the cleanup task.
+    // This keeps the query bounded even if cron is delayed and old rows remain in the table.
+    $now_ts = current_time('timestamp');
+    $threshold_ts = strtotime(RSP_CLEANUP_THREASHOLD_TIME, $now_ts);
+    if (false === $threshold_ts) {
+        $threshold_ts = strtotime('-30 days', $now_ts);
+    }
+    $threshold_date = date('Y-m-d H:i:s', $threshold_ts);
+
     $results = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT page_url, SUM(visit_count) AS total_visits FROM $table_name GROUP BY page_url ORDER BY total_visits DESC LIMIT %d",
+            "SELECT page_url, SUM(visit_count) AS total_visits
+                FROM $table_name
+                WHERE last_visit >= %s
+                GROUP BY page_url
+                ORDER BY total_visits DESC
+                LIMIT %d",
+            $threshold_date,
             intval($number)
         ),
         ARRAY_A
@@ -539,12 +551,20 @@ add_action('rsp_batch_cleanup_task', 'rsp_process_cleanup_batch');
 function rsp_process_cleanup_batch()
 {
     global $wpdb;
-    $wp_mysql_time_format = 'Y-m-d H:i:s';
-    $date = new DateTime('2025-01-25 09:30:34');
-    $date->modify(RSP_CLEANUP_THREASHOLD_TIME);
-    $threshold_date = $date->format($wp_mysql_time_format);
-    $table_name = $wpdb->prefix . 'rsp_page_visits';
-    // $threshold_date = date('Y-m-d H:i:s', strtotime(RSP_CLEANUP_THREASHOLD_TIME));
+
+    // Calculate threshold relative to "now" (WP time) instead of a fixed timestamp.
+    // This keeps the table bounded to the retention window defined by RSP_CLEANUP_THREASHOLD_TIME.
+    $now_ts = current_time('timestamp');
+    $threshold_ts = strtotime(RSP_CLEANUP_THREASHOLD_TIME, $now_ts);
+    if (false === $threshold_ts) {
+        $threshold_ts = strtotime('-30 days', $now_ts);
+        if (false === $threshold_ts) {
+            return;
+        }
+    }
+    $threshold_date = date('Y-m-d H:i:s', $threshold_ts);
+
+    $table_name = RSP_PLUGIN_TABLE;
     $batch_size = apply_filters('rsp_cleanup_batch_limit_size', RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
     $batch_size = validate_positive_integer($batch_size, RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
 
@@ -556,12 +576,10 @@ function rsp_process_cleanup_batch()
             $batch_size
         )
     );
-    // error_log('Deleted records: ' . $affected_rows . "\n\n", 3, ABSPATH . 'rsp_database_cleanup.log');
-    echo 'Deleted records: ' . $affected_rows . "\n\n";
 
     // If there are more records to delete, schedule the next batch, until $affected_rows is 0
-    if ($affected_rows > 0) {
-        // wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
+    if ($affected_rows > 0 && !wp_next_scheduled('rsp_batch_cleanup_task')) {
+        wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
     }
 }
 
