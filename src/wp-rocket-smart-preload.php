@@ -186,6 +186,107 @@ add_action('plugins_loaded', function () {
         add_action('admin_notices', 'rsp_wp_rocket_inactive_custom_admin_notice');
     }
 });
+
+/**
+ * Check whether the last_visit index exists on the visits table.
+ *
+ * @return bool
+ */
+function rsp_last_visit_index_exists()
+{
+    global $wpdb;
+    $table_name = RSP_PLUGIN_TABLE;
+
+    $count = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(1)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                    AND table_name = %s
+                    AND column_name = 'last_visit'",
+            $table_name
+        )
+    );
+
+    return (int) $count > 0;
+}
+
+function rsp_maybe_show_db_update_notice()
+{
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+    if ($screen && !in_array($screen->id, ['plugins', 'settings_page_wp-rocket-smart-preload'], true)) {
+        return;
+    }
+
+    // Show result notice after a DB update attempt.
+    if (isset($_GET['rsp_db_update'])) {
+        $status = sanitize_text_field(wp_unslash($_GET['rsp_db_update']));
+        if ($status === 'success') {
+            echo '<div class="notice notice-success is-dismissible"><p><strong>WP Rocket - Smart Preload:</strong> Database update completed.</p></div>';
+        } elseif ($status === 'already') {
+            echo '<div class="notice notice-info is-dismissible"><p><strong>WP Rocket - Smart Preload:</strong> Database is already up to date.</p></div>';
+        } elseif ($status === 'error') {
+            echo '<div class="notice notice-error is-dismissible"><p><strong>WP Rocket - Smart Preload:</strong> Database update failed. Please try again during low traffic or run the update via WP-CLI/your database tool.</p></div>';
+        }
+    }
+
+    if (rsp_last_visit_index_exists()) {
+        return;
+    }
+
+    $run_url = wp_nonce_url(
+        admin_url('admin-post.php?action=rsp_add_last_visit_index'),
+        'rsp_add_last_visit_index'
+    );
+
+    echo '<div class="notice notice-warning"><p><strong>WP Rocket - Smart Preload:</strong> A database optimization is recommended for high-traffic sites. Add an index on <code>last_visit</code> to keep cleanup and sitemap generation fast.</p>'
+        . '<p><a class="button button-primary" href="' . esc_url($run_url) . '">Add index now</a></p>'
+        . '<p><em>Note:</em> On large tables this can take time and may lock the visits table. Run during low traffic.</p></div>';
+}
+
+add_action('admin_notices', 'rsp_maybe_show_db_update_notice');
+
+function rsp_handle_add_last_visit_index()
+{
+    if (!current_user_can('manage_options')) {
+        wp_die('Forbidden');
+    }
+    check_admin_referer('rsp_add_last_visit_index');
+
+    $redirect_url = wp_get_referer();
+    if (empty($redirect_url)) {
+        $redirect_url = admin_url('plugins.php');
+    }
+    $redirect_url = remove_query_arg('rsp_db_update', $redirect_url);
+
+    if (rsp_last_visit_index_exists()) {
+        wp_safe_redirect(add_query_arg('rsp_db_update', 'already', $redirect_url));
+        exit;
+    }
+
+    global $wpdb;
+    $table_name = RSP_PLUGIN_TABLE;
+    $result = $wpdb->query("ALTER TABLE `$table_name` ADD INDEX `last_visit` (`last_visit`)");
+
+    if (false === $result) {
+        // If the index was created concurrently, treat it as already updated.
+        if (stripos((string) $wpdb->last_error, 'Duplicate key name') !== false) {
+            wp_safe_redirect(add_query_arg('rsp_db_update', 'already', $redirect_url));
+            exit;
+        }
+        wp_safe_redirect(add_query_arg('rsp_db_update', 'error', $redirect_url));
+        exit;
+    }
+
+    wp_safe_redirect(add_query_arg('rsp_db_update', 'success', $redirect_url));
+    exit;
+}
+
+add_action('admin_post_rsp_add_last_visit_index', 'rsp_handle_add_last_visit_index');
 // Activation hook to create database table
 register_activation_hook(__FILE__, 'rsp_fire_activation_hook_tasks');
 /**
