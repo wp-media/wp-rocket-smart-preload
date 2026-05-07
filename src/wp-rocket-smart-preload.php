@@ -708,14 +708,19 @@ add_filter('rocket_sitemap_preload_list', 'wprocket_preload_only_sitemap', PHP_I
 // Exclude other URLs from being added to the preload table.
 // these will still be cached after a visit, but not preloaded
 add_filter('rocket_preload_exclude_urls', function ($regexes, $url) {
-    static $urls_to_preload = null;
-    if ($urls_to_preload === null) {
+    // Use a static hash-map for O(1) lookups instead of in_array() which is O(n) per call.
+    // array_flip() runs once (O(n)), then isset() is O(1) per invocation.
+    // Source: https://www.php.net/manual/en/function.array-flip.php
+    // Source: https://www.php.net/manual/en/function.isset.php
+    static $urls_to_preload_map = null;
+    if ($urls_to_preload_map === null) {
         $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
         $sitemap_page_limit = rsp_validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
         $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
+        $urls_to_preload_map = array_flip($urls_to_preload);
     }
     $url = untrailingslashit($url);
-    if (!in_array($url, $urls_to_preload, true)) {
+    if (!isset($urls_to_preload_map[$url])) {
         $regexes[] = $url;
     }
     return $regexes;
@@ -744,46 +749,56 @@ function rsp_migrate_raw_ips_to_hashed()
         return;
     }
 
-    // Find rows with raw IPs (contain '.' for IPv4 or ':' for IPv6).
-    // Hashed IPs are exactly 32 hex chars [0-9a-f] with no dots or colons.
-    $raw_ip_rows = $wpdb->get_results(
-        "SELECT id, page_url, user_ip, visit_count FROM `{$table_name}` WHERE user_ip LIKE '%.%' OR user_ip LIKE '%:%'",
-        ARRAY_A
-    );
+    // Process in batches of 500 to avoid memory exhaustion on large tables.
+    // Uses cursor-based pagination (id > $last_id) for stable iteration even as rows are deleted.
+    // Source: https://www.php.net/manual/en/ini.core.php#ini.memory-limit
+    $batch_size = 500;
+    $last_id = 0;
 
-    if (empty($raw_ip_rows)) {
-        return;
-    }
+    do {
+        // Find rows with raw IPs (contain '.' for IPv4 or ':' for IPv6).
+        // Hashed IPs are exactly 32 hex chars [0-9a-f] with no dots or colons.
+        $raw_ip_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, page_url, user_ip, visit_count FROM `{$table_name}` WHERE (user_ip LIKE '%%.%%' OR user_ip LIKE '%%:%%') AND id > %d ORDER BY id ASC LIMIT %d",
+            $last_id,
+            $batch_size
+        ), ARRAY_A);
 
-    foreach ($raw_ip_rows as $row) {
-        $hashed_ip = wp_hash($row['user_ip']);
-
-        // Check if a row with the hashed IP + same page_url already exists
-        $existing = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, visit_count FROM `{$table_name}` WHERE page_url = %s AND user_ip = %s",
-            $row['page_url'],
-            $hashed_ip
-        ));
-
-        if ($existing) {
-            // Merge: add old visit_count to existing hashed row, delete old row
-            $wpdb->query($wpdb->prepare(
-                "UPDATE `{$table_name}` SET visit_count = visit_count + %d WHERE id = %d",
-                intval($row['visit_count']),
-                $existing->id
-            ));
-            $wpdb->delete($table_name, ['id' => $row['id']], ['%d']);
-        } else {
-            // No conflict: update IP in place
-            $wpdb->update(
-                $table_name,
-                ['user_ip' => $hashed_ip],
-                ['id' => $row['id']],
-                ['%s'],
-                ['%d']
-            );
+        if (!is_array($raw_ip_rows) || empty($raw_ip_rows)) {
+            break;
         }
-    }
+
+        foreach ($raw_ip_rows as $row) {
+            $last_id = (int) $row['id'];
+            $hashed_ip = wp_hash($row['user_ip']);
+
+            // Check if a row with the hashed IP + same page_url already exists
+            $existing = $wpdb->get_row($wpdb->prepare(
+                "SELECT id, visit_count FROM `{$table_name}` WHERE page_url = %s AND user_ip = %s",
+                $row['page_url'],
+                $hashed_ip
+            ));
+
+            if ($existing) {
+                // Merge: add old visit_count to existing hashed row, delete old row
+                $wpdb->query($wpdb->prepare(
+                    "UPDATE `{$table_name}` SET visit_count = visit_count + %d WHERE id = %d",
+                    intval($row['visit_count']),
+                    $existing->id
+                ));
+                $wpdb->delete($table_name, ['id' => $row['id']], ['%d']);
+            } else {
+                // No conflict: update IP in place
+                $wpdb->update(
+                    $table_name,
+                    ['user_ip' => $hashed_ip],
+                    ['id' => $row['id']],
+                    ['%s'],
+                    ['%d']
+                );
+            }
+        }
+    } while (count($raw_ip_rows) === $batch_size);
 }
 
 /**
