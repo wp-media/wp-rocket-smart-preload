@@ -435,10 +435,8 @@ function rsp_get_most_visited($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT, $urls_on
         }, $results);
     } else {
         $results = array_map(function ($page) {
-            return [
-                ...$page,
-                'page_url' => untrailingslashit($page['page_url']),
-            ];
+            $page['page_url'] = untrailingslashit($page['page_url']);
+            return $page;
         }, $results);
     }
 
@@ -625,7 +623,7 @@ function wprocket_preload_only_sitemap()
 add_filter('rocket_sitemap_preload_list', 'wprocket_preload_only_sitemap', PHP_INT_MAX);
 
 // Exclude other URLs from being added to the preload table.
-// these will still be cached after a visit, but not preloaded 
+// these will still be cached after a visit, but not preloaded
 add_filter('rocket_preload_exclude_urls', function ($regexes, $url) {
     static $urls_to_preload = null;
     if ($urls_to_preload === null) {
@@ -737,5 +735,5 @@ function rsp_validate_accepted_frequencies($value)
  *  -
  * - Document Requirements:
  *  - A working cron in the site
- * 
+ *
  */

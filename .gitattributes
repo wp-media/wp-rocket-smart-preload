@@ -1,0 +1,5 @@
+# Normalize all text files to LF line endings.
+# Source: PSR-12 §2.1 mandates Unix LF for PHP files.
+# https://www.php-fig.org/psr/psr-12/
+
+* text=auto eol=lf
