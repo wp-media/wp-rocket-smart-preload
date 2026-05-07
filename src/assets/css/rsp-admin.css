@@ -1,0 +1,42 @@
+.rsp-switch {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 20px;
+}
+
+.rsp-switch input {
+    display: none;
+}
+
+.rsp-switch .rsp-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.rsp-switch .rsp-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+.rsp-switch input:checked + .rsp-slider {
+    background-color: #2196F3;
+}
+
+.rsp-switch input:checked + .rsp-slider:before {
+    transform: translateX(14px);
+}

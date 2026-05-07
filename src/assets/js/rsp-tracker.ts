@@ -4,14 +4,22 @@ interface AjaxConfig {
 }
 declare const rsp_ajax: AjaxConfig;
 (async () => {
+    const isDebug: boolean = new URLSearchParams(window.location.search).has('rsp_debug');
+
     const recordVisit = async (): Promise<void> => {
         try {
             const pageUrl: string =
                 window.location.origin + window.location.pathname;
 
             if (!rsp_ajax || !rsp_ajax.ajax_url || !rsp_ajax.nonce) {
-                console.error('Ajax configuration is missing.');
+                if (isDebug) {
+                    console.warn('[RSP]', 'rsp_ajax config is not available');
+                }
                 return;
+            }
+
+            if (isDebug) {
+                console.log('[RSP]', 'Recording visit for:', pageUrl);
             }
 
             const formData: FormData = new FormData();
@@ -25,27 +33,23 @@ declare const rsp_ajax: AjaxConfig;
             });
 
             if (!response.ok) {
-                console.error('Failed to send visit data.');
+                if (isDebug) {
+                    console.warn('[RSP]', 'Response not OK:', response.status, response.statusText);
+                }
                 return;
             }
 
-            const result = await response.json();
-
-            if (!result.success) {
-                console.error('Error from server:', result.data);
-            } else {
-                console.log('Visit recorded successfully.');
+            const data = await response.json();
+            if (isDebug) {
+                console.log('[RSP]', 'Response:', data);
             }
         } catch (error) {
-            console.error(
-                'An error occurred while recording the visit:',
-                error
-            );
+            if (isDebug) {
+                console.error('[RSP]', 'Error:', error);
+            }
+            // Silently fail — visit tracking should never disrupt the user experience
         }
     };
 
-    // Ensure the DOM is fully loaded before executing the script
-    document.addEventListener('DOMContentLoaded', () => {
-        recordVisit();
-    });
+    recordVisit();
 })();

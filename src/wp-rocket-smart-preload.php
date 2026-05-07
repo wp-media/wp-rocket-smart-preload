@@ -35,9 +35,9 @@ if (!defined('RSP_SITEMAP_REGEX')) {
 if (!defined('RSP_SITEMAP_LOCATION')) {
     define('RSP_SITEMAP_LOCATION', ABSPATH . RSP_SITEMAP_FILENAME);
 }
-require_once 'constants.php';
-require_once 'settings-page.php';
-require_once 'inc/bot_filter.php';
+require_once plugin_dir_path(__FILE__) . 'constants.php';
+require_once plugin_dir_path(__FILE__) . 'settings-page.php';
+require_once plugin_dir_path(__FILE__) . 'inc/bot_filter.php';
 
 use function WP_Rocket_Smart_Preload\Utils\Bot_Filter\is_bot;
 
@@ -142,7 +142,9 @@ function rsp_prepare_preload_things_for_custom_sitemap($clear_cache = false)
     // 1 - truncate cache table upon plugin activation
     global $wpdb;
     $table_name = $wpdb->prefix . 'wpr_rocket_cache';
-    $wpdb->query("TRUNCATE TABLE $table_name");
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name)) === $table_name) {
+        $wpdb->query("TRUNCATE TABLE `{$table_name}`");
+    }
 
     // 2 clear the cache if needed
     if ($clear_cache && function_exists('rocket_clean_domain')) {
@@ -219,12 +221,12 @@ function rsp_fire_activation_hook_tasks()
 
     if (!wp_next_scheduled('rsp_daily_cleanup_task')) {
         $frequency = apply_filters('rsp_database_table_cleanup_frequency', RSP_DATABASE_TABLE_DEFAULT_CLEANUP_FREQUENCY);
-        $frequency = vaidate_accepted_frequencies($frequency);
+        $frequency = validate_accepted_frequencies($frequency);
         wp_schedule_event(time(), $frequency, 'rsp_daily_cleanup_task');
     }
     if (!wp_next_scheduled('rsp_update_preload_table_task')) {
         $frequency = apply_filters('rsp_update_preload_table_frequency', RSP_UPDATE_PRELOAD_TABLE_FREQUENCY);
-        $frequency = vaidate_accepted_frequencies($frequency);
+        $frequency = validate_accepted_frequencies($frequency);
         wp_schedule_event(time(), $frequency, 'rsp_update_preload_table_task');
     }
     // Set sitemap URL and flush rewrite rules
@@ -543,7 +545,7 @@ function rsp_process_cleanup_batch()
     global $wpdb;
     $wp_mysql_time_format = 'Y-m-d H:i:s';
     $date = new DateTime('now', wp_timezone());
-    $date->modify(RSP_CLEANUP_THREASHOLD_TIME);
+    $date->modify(RSP_CLEANUP_THRESHOLD_TIME);
     $threshold_date = $date->format($wp_mysql_time_format);
     $table_name = RSP_PLUGIN_TABLE;
     $batch_size = apply_filters('rsp_cleanup_batch_limit_size', RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
@@ -583,9 +585,10 @@ function rsp_sanitize_url($url)
     }
     $scheme = $parsed_url['scheme'] . '://';
     $host = $parsed_url['host'];
+    $port = isset($parsed_url['port']) ? ':' . intval($parsed_url['port']) : '';
     $path = isset($parsed_url['path']) ? $parsed_url['path'] : '';
 
-    return untrailingslashit($scheme . $host . $path);
+    return untrailingslashit($scheme . $host . $port . $path);
 }
 
 /**
@@ -657,7 +660,7 @@ function validate_positive_integer($value, $default_value)
  * @since 1.0.0
  * @author Sandy Figueroa
  */
-function vaidate_accepted_frequencies($value)
+function validate_accepted_frequencies($value)
 {
     $accepted_values = ['hourly', 'twicedaily', 'daily', 'weekly'];
     return in_array($value, $accepted_values, true) ? $value : 'daily';

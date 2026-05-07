@@ -6,11 +6,6 @@ import util from 'node:util';
 import { exec } from 'node:child_process';
 import esbuild from 'esbuild';
 
-/**
- * TODO: 
- * - Use promisified exec instead of callback in all exec calls
- * - Abstract parts of the process into functions
- */
 const execAsync = util.promisify(exec);
 /**
  * @type {Array<NodeJS.Platform>}
@@ -50,8 +45,8 @@ const cwd = process.cwd();
             fs.constants.R_OK | fs.constants.W_OK
         );
     } catch (e) {
-        const errorName = util.getSystemErrorName(e.errno);
-        if (errorName === 'ENOENT') {
+        const err = /** @type {NodeJS.ErrnoException} */ (e);
+        if (err.code === 'ENOENT') {
             console.error(
                 colorizeText(
                     "'src' directory does not exist, make sure the project is not broken",
@@ -76,8 +71,8 @@ const cwd = process.cwd();
             fs.constants.R_OK | fs.constants.W_OK
         );
     } catch (e) {
-        const errorName = util.getSystemErrorName(e.errno);
-        if (errorName === 'ENOENT') {
+        const err = /** @type {NodeJS.ErrnoException} */ (e);
+        if (err.code === 'ENOENT') {
             try {
                 console.log(colorizeText(`Creating directory:`, 'blue'), releaseFolder);
                 await fs.mkdir(releaseFolder);
@@ -110,7 +105,8 @@ const cwd = process.cwd();
             fs.constants.R_OK | fs.constants.W_OK
         );
     } catch (e) {
-        if (util.getSystemErrorName(e.errno) !== 'ENOENT') {
+        const err = /** @type {NodeJS.ErrnoException} */ (e);
+        if (err.code !== 'ENOENT') {
             console.error(
                 colorizeText(
                     `Something went wrong with the path: ${outPathTemp}\n`,
@@ -127,32 +123,32 @@ const cwd = process.cwd();
     await transpileTypeScript([trackerFilePathIn], trackerFilePathOut);
     const command = `rsync -r --exclude='*.ts' ${inPath}/* ${outPathTemp}`;
     console.log(colorizeText(`Copying files to:`, 'blue'), `${outPathTemp}...\n`);
-    exec(command, async (error, stdout, stderr) => {
-        if (error) {
-            console.error(
-                colorizeText(
-                    `Something when wrong copying the content:\nFrom: ${inPath}/* \nTo: ${outPathTemp}`,
-                    'red'
-                ),
-                error
-            );
-            process.exit(1);
-        }
+    try {
+        const { stdout, stderr } = await execAsync(command);
         if (stdout) {
             console.log(stdout, '\n');
         }
         if (stderr) {
             console.log(stderr);
         }
-        console.log(colorizeText('Writing version:', 'blue'), pkg.version, '\n');
-        await replaceVersioInFiles(
-            pkg.version,
-            mainPluginFile,
-            mainPluginFilePath,
-            outPathTemp
+    } catch (error) {
+        console.error(
+            colorizeText(
+                `Something went wrong copying the content:\nFrom: ${inPath}/* \nTo: ${outPathTemp}`,
+                'red'
+            ),
+            error
         );
-        processZip(outPathTemp, outPath, fileName, dirName, releaseFolder);
-    });
+        process.exit(1);
+    }
+    console.log(colorizeText('Writing version:', 'blue'), pkg.version, '\n');
+    await replaceVersioInFiles(
+        pkg.version,
+        mainPluginFile,
+        mainPluginFilePath,
+        outPathTemp
+    );
+    await processZip(outPathTemp, outPath, fileName, dirName, releaseFolder);
 })();
 /**
  * @param {string} outPath
@@ -177,7 +173,8 @@ async function processZip(
             fs.constants.R_OK | fs.constants.W_OK
         );
     } catch (e) {
-        if (util.getSystemErrorName(e.errno) !== 'ENOENT') {
+        const err = /** @type {NodeJS.ErrnoException} */ (e);
+        if (err.code !== 'ENOENT') {
             console.error(
                 colorizeText(
                     `Something went wrong with the path: ${outPath}\n`,
@@ -205,27 +202,27 @@ async function processZip(
     }
     const command = `cd ${releaseFolder} && zip -r ${fileName} ${dirName} && cd ${cwd}`;
     console.log(colorizeText('Packing files:', 'blue'), `${fileName}...\n`);
-    exec(command, async (error, stdout, stderr) => {
-        if (error) {
-            console.error(
-                colorizeText(
-                    'Something when wrong running the zip command:\n',
-                    'red'
-                ),
-                error
-            );
-            process.exit(1);
-        }
+    try {
+        const { stdout, stderr } = await execAsync(command);
         if (stdout) {
             console.log(stdout);
         }
         if (stderr) {
             console.log(stderr);
         }
-        // await removeOutPathTemp(outPathTemp);
-        coloredLog('\nProcess finished successfuly...\n', 'green');
-        coloredLog(`Find the packaged file in ${outPath}\n`, 'green');
-    });
+    } catch (error) {
+        console.error(
+            colorizeText(
+                'Something went wrong running the zip command:\n',
+                'red'
+            ),
+            error
+        );
+        process.exit(1);
+    }
+    // await removeOutPathTemp(outPathTemp);
+    coloredLog('\nProcess finished successfully...\n', 'green');
+    coloredLog(`Find the packaged file in ${outPath}\n`, 'green');
 }
 /**
  * @param {string} outPathTemp
@@ -355,7 +352,7 @@ async function replaceVersioInFiles(
     } catch (e) {
         console.error(
             colorizeText(
-                `Something when wrong writing the version into the '${mainPluginFile}' file`,
+                `Something went wrong writing the version into the '${mainPluginFile}' file`,
                 'red'
             ),
             e
@@ -373,7 +370,7 @@ function verifyVersion(version) {
         throw new Error(
             `The version must be 'string'. '${typeof version}' is invalid`
         );
-    if (!version.match(/^\d\.\d\.\d$/)) {
+    if (!version.match(/^\d+\.\d+\.\d+$/)) {
         throw new Error(`The version is not valid. '${version}' is invalid`);
     }
     return true;
@@ -386,8 +383,9 @@ async function typescriptCheck() {
         // Run TypeScript type checking
         await execAsync(command);
     } catch (error) {
+        const execErr = /** @type {{ stdout?: string }} */ (error);
         coloredError('Checking failed!');
-        console.error(colorizeText('Error:', 'red'), `${error.stdout}`);
+        console.error(colorizeText('Error:', 'red'), execErr.stdout ?? '');
         process.exit(1);
     }
     console.log(colorizeText('Typescript successfully checked.', 'green'), 'Proceeding with the build...', '\n');

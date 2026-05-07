@@ -37,9 +37,9 @@ function wp_rocket_smart_preload_settings_page()
                 <tr valign="top">
                     <th scope="row">IP Protection</th>
                     <td>
-                        <label class="switch">
+                        <label class="rsp-switch">
                             <input type="checkbox" id="ip-protection" name="ip-protection" <?php checked($deactivate_ip_protection, '0'); ?>>
-                            <span class="slider round"></span>
+                            <span class="rsp-slider"></span>
                         </label>
                         <p class="description">Enable to prevent counting fake visits due to multiple page refreshes from the same IP address.</p>
                     </td>
@@ -50,50 +50,6 @@ function wp_rocket_smart_preload_settings_page()
             <button type="submit" class="button-primary">Save Settings</button>
         </form>
     </div>
-    <style>
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 34px;
-            height: 20px;
-        }
-
-        .switch input {
-            display: none;
-        }
-
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 14px;
-            width: 14px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-
-        input:checked+.slider {
-            background-color: #2196F3;
-        }
-
-        input:checked+.slider:before {
-            transform: translateX(14px);
-        }
-    </style>
 <?php
 }
 
@@ -140,6 +96,14 @@ add_action('admin_post_save_wp_rocket_smart_preload_settings', 'save_wp_rocket_s
 
 function rsp_admin_menu()
 {
-    add_options_page('WP Rocket - Smart Preload', 'WP Rocket - Smart Preload', 'manage_options', 'wp-rocket-smart-preload', 'wp_rocket_smart_preload_settings_page');
+    $hook_suffix = add_options_page('WP Rocket - Smart Preload', 'WP Rocket - Smart Preload', 'manage_options', 'wp-rocket-smart-preload', 'wp_rocket_smart_preload_settings_page');
+    if ($hook_suffix) {
+        add_action('admin_enqueue_scripts', function ($hook) use ($hook_suffix) {
+            if ($hook !== $hook_suffix) {
+                return;
+            }
+            wp_enqueue_style('rsp-admin-css', plugin_dir_url(__FILE__) . 'assets/css/rsp-admin.css', [], RSP_PLUGIN_VERSION);
+        });
+    }
 }
 add_action('admin_menu', 'rsp_admin_menu');

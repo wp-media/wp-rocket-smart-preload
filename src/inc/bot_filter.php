@@ -12,7 +12,6 @@ namespace WP_Rocket_Smart_Preload\Utils\Bot_Filter;
  */
 function is_bot(string $user_agent)
 {
-    $user_agent = strtolower($user_agent);
     $bots = array(
         'WP-Rocket',
         'WP Rocket',
@@ -40,7 +39,7 @@ function is_bot(string $user_agent)
         'dotbot'
     );
     foreach ($bots as $bot) {
-        if (stripos($user_agent, strtolower($bot)) !== false) {
+        if (stripos($user_agent, $bot) !== false) {
             return true;
         }
     }
