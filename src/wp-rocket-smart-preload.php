@@ -253,7 +253,7 @@ function rsp_uninstall_plugin()
 {
     global $wpdb;
     $table_name = RSP_PLUGIN_TABLE;
-    $wpdb->query("DROP TABLE IF EXISTS $table_name");
+    $wpdb->query("DROP TABLE IF EXISTS `{$table_name}`");
     rsp_remove_scheduled_tasks();
     rsp_prepare_preload_things_for_custom_sitemap(true);
     rsp_remove_database_options();
@@ -470,14 +470,14 @@ function rsp_get_urls_to_preload($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT)
     $urls_to_always_include = array_filter(array_map('rsp_sanitize_url', $urls_to_always_include), function ($url) {
         return !is_null($url);
     });
-    $most_visited = [];
-    if (false !== get_transient('rsp_most_visited_pages')) {
-        $most_visited = get_transient('rsp_most_visited_pages');
-    } else {
+    $most_visited = get_transient('rsp_most_visited_pages');
+    if ($most_visited === false) {
         $most_visited = rsp_get_most_visited($number, true);
         $expiration_time = apply_filters('rsp_cached_sitemap_urls_expiration_time', RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
         $expiration_time = validate_positive_integer($expiration_time, RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
         if (!empty($most_visited)) set_transient('rsp_most_visited_pages', $most_visited, $expiration_time);
+    } else {
+        $most_visited = is_array($most_visited) ? $most_visited : [];
     }
     return array_unique(array_merge($urls_to_always_include, $most_visited));
 }
@@ -572,7 +572,7 @@ function rsp_process_cleanup_batch()
  * @since 1.0.0
  * @author Sandy Figueroa
  * @param string $url The raw URL.
- * @return string The sanitized URL.
+ * @return string|null The sanitized URL, or null if invalid.
  */
 function rsp_sanitize_url($url)
 {
@@ -616,7 +616,7 @@ function rsp_get_user_ip()
  * This function is responsible for adding the sitemap to WP Rocket, so preload use it to work.
  * It ensures that only the Smart Preload sitemap is used.
  *
- * @return void
+ * @return array The list of sitemap URLs for WP Rocket Preload.
  * @since 1.0.0
  * @author Sandy Figueroa
  */

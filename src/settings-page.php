@@ -3,6 +3,7 @@
 function wp_rocket_smart_preload_settings_page()
 {
     $urls_to_always_include = get_option('rsp_pages_to_always_include', []);
+    $urls_to_always_include = is_array($urls_to_always_include) ? $urls_to_always_include : [];
     $sitemap_page_limit = get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
     $deactivate_ip_protection = get_option('rsp_deactivate_ip_protection', 0);
 ?>
@@ -28,7 +29,7 @@ function wp_rocket_smart_preload_settings_page()
                     <td>
                         <input type="number" id="url-limit" name="url-limit" min="1" step="1" value="<?php echo esc_attr($sitemap_page_limit); ?>">
                         <p class="description">
-                            Set the maximum number of URLs to be included in the sitemap. Only positive numbers are allowed. (Default is <?php echo RSP_SITEMAP_PAGE_DEFAULT_LIMIT ?>)
+                            Set the maximum number of URLs to be included in the sitemap. Only positive numbers are allowed. (Default is <?php echo esc_html(RSP_SITEMAP_PAGE_DEFAULT_LIMIT); ?>)
                             <br>
                             <strong>Note:</strong> In most large sites, only a small number of pages are really visited, so, it is recommended to keep this number low to avoid unnecessary processing.
                         </p>
@@ -64,14 +65,15 @@ function save_wp_rocket_smart_preload_settings()
         wp_die('Security check failed', 'Forbidden', ['response' => 403]);
     }
     // Removing duplicates
-    $raw_urls = array_unique(array_map('trim', explode("\n", $_POST['preload-urls'])));
+    $raw_urls_input = isset($_POST['preload-urls']) ? $_POST['preload-urls'] : '';
+    $raw_urls = array_unique(array_map('trim', explode("\n", $raw_urls_input)));
     // Validate and sanitize URLs
     $urls = array_map('untrailingslashit', array_filter(array_map('sanitize_text_field', $raw_urls), function ($url) {
         return filter_var($url, FILTER_VALIDATE_URL);
     }));
 
     // Validate URL limit
-    $url_limit = intval($_POST['url-limit']);
+    $url_limit = isset($_POST['url-limit']) ? intval($_POST['url-limit']) : 1;
     if ($url_limit <= 0) {
         $url_limit = 1; // default to 1 if invalid
     }
