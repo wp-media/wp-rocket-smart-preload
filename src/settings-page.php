@@ -61,11 +61,11 @@ function save_wp_rocket_smart_preload_settings()
         wp_die('Unauthorized access', 'Forbidden', ['response' => 403]);
     }
     // Verify nonce
-    if (!isset($_POST['wp_rocket_nonce']) || !wp_verify_nonce($_POST['wp_rocket_nonce'], 'save_settings')) {
+    if (!isset($_POST['wp_rocket_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wp_rocket_nonce'])), 'save_settings')) {
         wp_die('Security check failed', 'Forbidden', ['response' => 403]);
     }
     // Removing duplicates
-    $raw_urls_input = isset($_POST['preload-urls']) ? $_POST['preload-urls'] : '';
+    $raw_urls_input = isset($_POST['preload-urls']) ? sanitize_textarea_field(wp_unslash($_POST['preload-urls'])) : '';
     $raw_urls = array_unique(array_map('trim', explode("\n", $raw_urls_input)));
     // Validate and sanitize URLs
     $urls = array_map('untrailingslashit', array_filter(array_map('sanitize_text_field', $raw_urls), function ($url) {
@@ -73,7 +73,7 @@ function save_wp_rocket_smart_preload_settings()
     }));
 
     // Validate URL limit
-    $url_limit = isset($_POST['url-limit']) ? intval($_POST['url-limit']) : 1;
+    $url_limit = isset($_POST['url-limit']) ? intval(wp_unslash($_POST['url-limit'])) : 1;
     if ($url_limit <= 0) {
         $url_limit = 1; // default to 1 if invalid
     }

@@ -1,4 +1,7 @@
 <?php
+if (!defined('ABSPATH')) {
+    exit;
+}
 if (!defined('RSP_SITEMAP_PAGE_DEFAULT_LIMIT')) {
     define('RSP_SITEMAP_PAGE_DEFAULT_LIMIT', 50);
 }

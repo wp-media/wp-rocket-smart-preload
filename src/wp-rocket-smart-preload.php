@@ -123,7 +123,7 @@ function rsp_custom_sitemap_template_redirect()
     if (get_query_var(RSP_SITEMAP_NAME)) {
         header('Content-Type: application/xml; charset=utf-8');
         $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
-        $sitemap_page_limit = validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
+        $sitemap_page_limit = rsp_validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
         echo rsp_get_generated_sitemap($sitemap_page_limit);
         exit;
     }
@@ -219,14 +219,18 @@ function rsp_fire_activation_hook_tasks()
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
 
+    // Migrate raw IPs to hashed format (upgrade from pre-hashing versions).
+    // Raw IPs contain '.' (IPv4) or ':' (IPv6); hashed IPs are 32 hex chars [0-9a-f].
+    rsp_migrate_raw_ips_to_hashed();
+
     if (!wp_next_scheduled('rsp_daily_cleanup_task')) {
         $frequency = apply_filters('rsp_database_table_cleanup_frequency', RSP_DATABASE_TABLE_DEFAULT_CLEANUP_FREQUENCY);
-        $frequency = validate_accepted_frequencies($frequency);
+        $frequency = rsp_validate_accepted_frequencies($frequency);
         wp_schedule_event(time(), $frequency, 'rsp_daily_cleanup_task');
     }
     if (!wp_next_scheduled('rsp_update_preload_table_task')) {
         $frequency = apply_filters('rsp_update_preload_table_frequency', RSP_UPDATE_PRELOAD_TABLE_FREQUENCY);
-        $frequency = validate_accepted_frequencies($frequency);
+        $frequency = rsp_validate_accepted_frequencies($frequency);
         wp_schedule_event(time(), $frequency, 'rsp_update_preload_table_task');
     }
     // Set sitemap URL and flush rewrite rules
@@ -354,11 +358,11 @@ function rsp_record_visit()
 {
     global $wpdb;
     // Bail if it's a bot
-    if (isset($_SERVER['HTTP_USER_AGENT']) && is_bot($_SERVER['HTTP_USER_AGENT'])) {
+    if (isset($_SERVER['HTTP_USER_AGENT']) && is_bot(sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])))) {
         wp_send_json_error('Skipping bot visit');
     }
     // Verify nonce
-    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'rsp_record_visit_nonce')) {
+    if (!isset($_POST['nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['nonce'])), 'rsp_record_visit_nonce')) {
         wp_send_json_error('Invalid nonce');
     }
 
@@ -366,48 +370,33 @@ function rsp_record_visit()
         wp_send_json_error('Invalid page URL');
     }
 
-    $page_url = rsp_sanitize_url($_POST['page_url']); // Sanitize the URL
+    $page_url = rsp_sanitize_url(wp_unslash($_POST['page_url']));
     if ($page_url === null) {
         wp_send_json_error('Invalid page URL');
     }
     $user_ip = rsp_get_user_ip();
     $table_name = RSP_PLUGIN_TABLE;
+    $now = current_time('mysql');
+    $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
+    $bypass = $deactivate_ip_protection ? 1 : 0;
+    $threshold = RSP_IP_PROTECTION_TIME_THRESHOLD;
 
-    // Check if a record exists
-    $existing_visit = $wpdb->get_row(
-        $wpdb->prepare("SELECT * FROM $table_name WHERE page_url = %s AND user_ip = %s", $page_url, $user_ip)
-    );
+    // Use INSERT ... ON DUPLICATE KEY UPDATE for atomicity (prevents race conditions).
+    // MySQL affected rows: 1 = inserted, 2 = updated, 0 = no change (time threshold).
+    // Source: https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+    $result = $wpdb->query($wpdb->prepare(
+        "INSERT INTO `{$table_name}` (page_url, user_ip, last_visit, visit_count)
+         VALUES (%s, %s, %s, 1)
+         ON DUPLICATE KEY UPDATE
+            visit_count = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, visit_count + 1, visit_count),
+            last_visit = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, VALUES(last_visit), last_visit)",
+        $page_url, $user_ip, $now,
+        $bypass, $now, $threshold,
+        $bypass, $now, $threshold
+    ));
 
-    if ($existing_visit) {
-        $wp_tz = wp_timezone();
-        $last_visit_dt = new DateTimeImmutable($existing_visit->last_visit, $wp_tz);
-        $now_dt = current_datetime();
-        $elapsed_seconds = $now_dt->getTimestamp() - $last_visit_dt->getTimestamp();
-        $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
-        // Update last visit timestamp and increment visit count if over an hour since last visit (or if IP protection is deactivated)
-        if ($deactivate_ip_protection || ($elapsed_seconds > RSP_IP_PROTECTION_TIME_THRESHOLD)) {
-            $wpdb->update(
-                $table_name,
-                [
-                    'last_visit' => current_time('mysql'),
-                    'visit_count' => $existing_visit->visit_count + 1
-                ],
-                ['id' => $existing_visit->id]
-            );
-        } else {
-            wp_send_json_error('Visit not recorded. Too early to record a new visit from the same IP.');
-        }
-    } else {
-        // Insert new visit record
-        $wpdb->insert(
-            $table_name,
-            [
-                'page_url' => $page_url,
-                'user_ip' => $user_ip,
-                'last_visit' => current_time('mysql'),
-                'visit_count' => 1
-            ]
-        );
+    if ($result === false) {
+        wp_send_json_error('Failed to record visit');
     }
 
     wp_send_json_success('Visit recorded');
@@ -474,7 +463,7 @@ function rsp_get_urls_to_preload($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT)
     if ($most_visited === false) {
         $most_visited = rsp_get_most_visited($number, true);
         $expiration_time = apply_filters('rsp_cached_sitemap_urls_expiration_time', RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
-        $expiration_time = validate_positive_integer($expiration_time, RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
+        $expiration_time = rsp_validate_positive_integer($expiration_time, RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
         if (!empty($most_visited)) set_transient('rsp_most_visited_pages', $most_visited, $expiration_time);
     } else {
         $most_visited = is_array($most_visited) ? $most_visited : [];
@@ -549,7 +538,7 @@ function rsp_process_cleanup_batch()
     $threshold_date = $date->format($wp_mysql_time_format);
     $table_name = RSP_PLUGIN_TABLE;
     $batch_size = apply_filters('rsp_cleanup_batch_limit_size', RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
-    $batch_size = validate_positive_integer($batch_size, RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
+    $batch_size = rsp_validate_positive_integer($batch_size, RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
 
     // Delete a batch of records
     $affected_rows = $wpdb->query(
@@ -592,22 +581,31 @@ function rsp_sanitize_url($url)
 }
 
 /**
- * Get the real IP address of the user.
+ * Get a hashed representation of the user's IP address.
+ *
+ * Uses filter_var() for IP validation (PHP 5.2+, https://www.php.net/manual/en/filter.filters.validate.php).
+ * Hashes the IP with wp_hash() for GDPR compliance — the hash is deterministic per-site,
+ * preserving deduplication while making the real IP non-recoverable.
  *
  * @since 1.0.0
  * @author Sandy Figueroa
- * @return string The user's IP address.
+ * @return string A hashed representation of the user's IP, or hash of '0.0.0.0' if unavailable.
  */
 function rsp_get_user_ip()
 {
+    $ip = '';
     if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
-        return sanitize_text_field($_SERVER['HTTP_CF_CONNECTING_IP']);
+        $ip = sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP']));
     } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        return sanitize_text_field(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
+        $ip = trim(explode(',', sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR'])))[0]);
     } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
-        return sanitize_text_field($_SERVER['REMOTE_ADDR']);
+        $ip = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']));
     }
-    return '0.0.0.0';
+    if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        $ip = '0.0.0.0';
+    }
+    // Hash the IP for GDPR compliance — deterministic per-site, non-reversible
+    return wp_hash($ip);
 }
 
 /**
@@ -629,15 +627,83 @@ add_filter('rocket_sitemap_preload_list', 'wprocket_preload_only_sitemap', PHP_I
 // Exclude other URLs from being added to the preload table.
 // these will still be cached after a visit, but not preloaded 
 add_filter('rocket_preload_exclude_urls', function ($regexes, $url) {
+    static $urls_to_preload = null;
+    if ($urls_to_preload === null) {
+        $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
+        $sitemap_page_limit = rsp_validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
+        $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
+    }
     $url = untrailingslashit($url);
-    $sitemap_page_limit = apply_filters('rsp_sitemap_page_limit', get_option('rsp_sitemap_page_limit', RSP_SITEMAP_PAGE_DEFAULT_LIMIT));
-    $sitemap_page_limit = validate_positive_integer($sitemap_page_limit, RSP_SITEMAP_PAGE_DEFAULT_LIMIT);
-    $urls_to_preload = rsp_get_urls_to_preload($sitemap_page_limit);
-    if (! in_array($url, $urls_to_preload, true)) {
+    if (!in_array($url, $urls_to_preload, true)) {
         $regexes[] = $url;
     }
     return $regexes;
 }, PHP_INT_MAX, 2);
+
+/**
+ * Migrates raw (unhashed) IP addresses to hashed format.
+ *
+ * Detects rows with raw IPs (containing '.' or ':') and replaces them
+ * with wp_hash() output. Handles potential UNIQUE KEY conflicts by merging
+ * visit counts when a hashed IP would collide with an existing row.
+ *
+ * Runs once during plugin activation (upgrade path from pre-hashing versions).
+ *
+ * @return void
+ * @since 1.5.0
+ * @author Sandy Figueroa
+ */
+function rsp_migrate_raw_ips_to_hashed()
+{
+    global $wpdb;
+    $table_name = RSP_PLUGIN_TABLE;
+
+    // Check if the table exists first
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name)) !== $table_name) {
+        return;
+    }
+
+    // Find rows with raw IPs (contain '.' for IPv4 or ':' for IPv6).
+    // Hashed IPs are exactly 32 hex chars [0-9a-f] with no dots or colons.
+    $raw_ip_rows = $wpdb->get_results(
+        "SELECT id, page_url, user_ip, visit_count FROM `{$table_name}` WHERE user_ip LIKE '%.%' OR user_ip LIKE '%:%'",
+        ARRAY_A
+    );
+
+    if (empty($raw_ip_rows)) {
+        return;
+    }
+
+    foreach ($raw_ip_rows as $row) {
+        $hashed_ip = wp_hash($row['user_ip']);
+
+        // Check if a row with the hashed IP + same page_url already exists
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, visit_count FROM `{$table_name}` WHERE page_url = %s AND user_ip = %s",
+            $row['page_url'],
+            $hashed_ip
+        ));
+
+        if ($existing) {
+            // Merge: add old visit_count to existing hashed row, delete old row
+            $wpdb->query($wpdb->prepare(
+                "UPDATE `{$table_name}` SET visit_count = visit_count + %d WHERE id = %d",
+                intval($row['visit_count']),
+                $existing->id
+            ));
+            $wpdb->delete($table_name, ['id' => $row['id']], ['%d']);
+        } else {
+            // No conflict: update IP in place
+            $wpdb->update(
+                $table_name,
+                ['user_ip' => $hashed_ip],
+                ['id' => $row['id']],
+                ['%s'],
+                ['%d']
+            );
+        }
+    }
+}
 
 /**
  * Validates if the given value is a positive integer.
@@ -648,7 +714,7 @@ add_filter('rocket_preload_exclude_urls', function ($regexes, $url) {
  * @since 1.0.0
  * @author Sandy Figueroa
  */
-function validate_positive_integer($value, $default_value)
+function rsp_validate_positive_integer($value, $default_value)
 {
     return is_numeric($value) && $value > 0 ? intval($value) : $default_value;
 }
@@ -660,7 +726,7 @@ function validate_positive_integer($value, $default_value)
  * @since 1.0.0
  * @author Sandy Figueroa
  */
-function validate_accepted_frequencies($value)
+function rsp_validate_accepted_frequencies($value)
 {
     $accepted_values = ['hourly', 'twicedaily', 'daily', 'weekly'];
     return in_array($value, $accepted_values, true) ? $value : 'daily';

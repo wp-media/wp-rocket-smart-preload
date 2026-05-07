@@ -347,7 +347,6 @@ async function replaceVersioInFiles(
             toReplace,
             version
         );
-        await fs.rm(mainPluginFile, { force: true });
         await fs.writeFile(mainPluginFilePath, replaced, { encoding: 'utf-8' });
     } catch (e) {
         console.error(

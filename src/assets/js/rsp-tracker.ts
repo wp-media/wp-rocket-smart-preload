@@ -2,7 +2,7 @@ interface AjaxConfig {
     ajax_url: string;
     nonce: string;
 }
-declare const rsp_ajax: AjaxConfig;
+declare const rsp_ajax: AjaxConfig | undefined;
 (async () => {
     const isDebug: boolean = new URLSearchParams(window.location.search).has('rsp_debug');
 
