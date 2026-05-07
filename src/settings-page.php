@@ -15,7 +15,7 @@ function wp_rocket_smart_preload_settings_page()
                 <tr valign="top">
                     <th scope="row">Always Preload These URLs</th>
                     <td>
-                        <textarea id="preload-urls" name="preload-urls" rows="7" cols="80"><?php echo implode("\n", $urls_to_always_include); ?></textarea>
+                        <textarea id="preload-urls" name="preload-urls" rows="7" cols="80"><?php echo esc_textarea(implode("\n", $urls_to_always_include)); ?></textarea>
                         <p class="description">
                             Specify a list of URLs to always be preloaded. These URLs will be added to the sitemap in addition to the most visited ones. Add each URL on a separate line.
                             <br>
@@ -99,9 +99,13 @@ function wp_rocket_smart_preload_settings_page()
 
 function save_wp_rocket_smart_preload_settings()
 {
+    // Verify capability
+    if (!current_user_can('manage_options')) {
+        wp_die('Unauthorized access', 'Forbidden', ['response' => 403]);
+    }
     // Verify nonce
     if (!isset($_POST['wp_rocket_nonce']) || !wp_verify_nonce($_POST['wp_rocket_nonce'], 'save_settings')) {
-        return;
+        wp_die('Security check failed', 'Forbidden', ['response' => 403]);
     }
     // Removing duplicates
     $raw_urls = array_unique(array_map('trim', explode("\n", $_POST['preload-urls'])));
@@ -124,9 +128,13 @@ function save_wp_rocket_smart_preload_settings()
     update_option('rsp_sitemap_page_limit', $url_limit);
     update_option('rsp_deactivate_ip_protection', $ip_protection);
 
+    // Invalidate cached sitemap URLs so changes take effect immediately
+    delete_transient('rsp_most_visited_pages');
+
     // Redirect back to the settings page
     $redirect_url = add_query_arg('page', 'wp-rocket-smart-preload', admin_url('options-general.php'));
-    wp_redirect($redirect_url);
+    wp_safe_redirect($redirect_url);
+    exit;
 }
 add_action('admin_post_save_wp_rocket_smart_preload_settings', 'save_wp_rocket_smart_preload_settings');
 

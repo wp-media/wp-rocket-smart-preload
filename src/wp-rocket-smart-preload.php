@@ -352,7 +352,7 @@ function rsp_record_visit()
 {
     global $wpdb;
     // Bail if it's a bot
-    if (is_bot($_SERVER['HTTP_USER_AGENT'])) {
+    if (isset($_SERVER['HTTP_USER_AGENT']) && is_bot($_SERVER['HTTP_USER_AGENT'])) {
         wp_send_json_error('Skipping bot visit');
     }
     // Verify nonce
@@ -377,11 +377,13 @@ function rsp_record_visit()
     );
 
     if ($existing_visit) {
-        $last_visit_time = strtotime($existing_visit->last_visit);
-        $current_time = current_time('timestamp');
+        $wp_tz = wp_timezone();
+        $last_visit_dt = new DateTimeImmutable($existing_visit->last_visit, $wp_tz);
+        $now_dt = current_datetime();
+        $elapsed_seconds = $now_dt->getTimestamp() - $last_visit_dt->getTimestamp();
         $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
         // Update last visit timestamp and increment visit count if over an hour since last visit (or if IP protection is deactivated)
-        if ($deactivate_ip_protection || (($current_time - $last_visit_time) > RSP_IP_PROTECTION_TIME_THRESHOLD)) {
+        if ($deactivate_ip_protection || ($elapsed_seconds > RSP_IP_PROTECTION_TIME_THRESHOLD)) {
             $wpdb->update(
                 $table_name,
                 [
@@ -484,7 +486,7 @@ function rsp_get_urls_to_preload($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT)
  *
  * @param int $number The number of entries to include in the sitemap. Default is RSP_SITEMAP_PAGE_DEFAULT_LIMIT.
  *
- * @return void
+ * @return string The generated sitemap XML.
  * @since 1.0.0
  * @author Sandy Figueroa
  */
@@ -540,11 +542,10 @@ function rsp_process_cleanup_batch()
 {
     global $wpdb;
     $wp_mysql_time_format = 'Y-m-d H:i:s';
-    $date = new DateTime('2025-01-25 09:30:34');
+    $date = new DateTime('now', wp_timezone());
     $date->modify(RSP_CLEANUP_THREASHOLD_TIME);
     $threshold_date = $date->format($wp_mysql_time_format);
-    $table_name = $wpdb->prefix . 'rsp_page_visits';
-    // $threshold_date = date('Y-m-d H:i:s', strtotime(RSP_CLEANUP_THREASHOLD_TIME));
+    $table_name = RSP_PLUGIN_TABLE;
     $batch_size = apply_filters('rsp_cleanup_batch_limit_size', RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
     $batch_size = validate_positive_integer($batch_size, RSP_CLEANUP_BATCH_DEFAULT_LIMIT);
 
@@ -556,12 +557,10 @@ function rsp_process_cleanup_batch()
             $batch_size
         )
     );
-    // error_log('Deleted records: ' . $affected_rows . "\n\n", 3, ABSPATH . 'rsp_database_cleanup.log');
-    echo 'Deleted records: ' . $affected_rows . "\n\n";
 
     // If there are more records to delete, schedule the next batch, until $affected_rows is 0
     if ($affected_rows > 0) {
-        // wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
+        wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
     }
 }
 
