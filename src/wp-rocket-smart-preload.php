@@ -71,6 +71,9 @@ add_filter('rsp_update_preload_table_frequency', function ($update_preload_table
 add_filter('rsp_deactivate_ip_protection', function ($deactivate_ip_protection) {
     return $deactivate_ip_protection; // Edit this (return true) to deactivate the IP protection feature. (This feature prevents counting fake visits due to multiple page refreshes from the same IP address)
 }, 0);
+add_filter('rsp_max_table_rows', function ($max_table_rows) {
+    return $max_table_rows; // Edit this to change the maximum number of rows allowed in the tracking table (prevents unbounded growth on high-traffic sites)
+}, 0);
 // STOP EDITING
 
 
@@ -213,11 +216,16 @@ function rsp_fire_activation_hook_tasks()
         last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         visit_count BIGINT UNSIGNED DEFAULT 1,
         PRIMARY KEY (id),
-        UNIQUE KEY unique_visit (page_url(255), user_ip)
+        UNIQUE KEY unique_visit (page_url(255), user_ip),
+        KEY idx_last_visit (last_visit)
     ) $charset_collate;";
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
+    // Record the DB schema version so the plugins_loaded upgrade check knows
+    // the schema is current and skips redundant dbDelta() calls on every request.
+    // Source: https://developer.wordpress.org/plugins/creating-tables-with-plugins/#adding-an-upgrade-function
+    update_option('rsp_db_version', RSP_DB_VERSION);
 
     // Migrate raw IPs to hashed format (upgrade from pre-hashing versions).
     // Raw IPs contain '.' (IPv4) or ':' (IPv6); hashed IPs are 32 hex chars [0-9a-f].
@@ -240,6 +248,49 @@ function rsp_fire_activation_hook_tasks()
     flush_rewrite_rules();
 }
 add_action('rsp_update_preload_table_task', 'rsp_prepare_preload_things_for_custom_sitemap');
+
+/**
+ * Runs database schema upgrades when the plugin is updated (not just activated).
+ *
+ * WordPress does not call register_activation_hook() on plugin updates, so
+ * schema changes (e.g., new indexes) must be applied here.
+ * Source: https://developer.wordpress.org/plugins/creating-tables-with-plugins/#adding-an-upgrade-function
+ *
+ * Uses get_option() on an autoloaded option — in-memory array lookup, no DB query
+ * on non-object-cache sites. Only runs dbDelta() when the stored version differs
+ * from the current RSP_DB_VERSION constant, i.e., after a plugin update.
+ *
+ * @return void
+ * @since 1.5.0
+ * @author Sandy Figueroa
+ */
+function rsp_run_db_upgrades()
+{
+    if (get_option('rsp_db_version') === RSP_DB_VERSION) {
+        return;
+    }
+
+    global $wpdb;
+    $table_name = RSP_PLUGIN_TABLE;
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE $table_name (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        page_url TEXT NOT NULL,
+        user_ip VARCHAR(45) NOT NULL,
+        last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        visit_count BIGINT UNSIGNED DEFAULT 1,
+        PRIMARY KEY (id),
+        UNIQUE KEY unique_visit (page_url(255), user_ip),
+        KEY idx_last_visit (last_visit)
+    ) $charset_collate;";
+
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+    update_option('rsp_db_version', RSP_DB_VERSION);
+}
+add_action('plugins_loaded', 'rsp_run_db_upgrades');
+
 // Uninstall hook to clean up database table
 register_uninstall_hook(__FILE__, 'rsp_uninstall_plugin');
 /**
@@ -271,6 +322,7 @@ function rsp_remove_database_options()
     delete_option('rsp_pages_to_always_include');
     delete_option('rsp_sitemap_page_limit');
     delete_option('rsp_deactivate_ip_protection');
+    delete_option('rsp_db_version');
 }
 /**
  * Removes transients related to WP Rocket - Smart Preload.
@@ -286,6 +338,7 @@ function rsp_remove_transients()
 {
     delete_transient('rsp_wp_rocket_deactivated_notice');
     delete_transient('rsp_most_visited_pages');
+    delete_transient('rsp_table_row_count');
 }
 /**
  * Function hooked to the deactivation hook to run necessary clean up tasks.
@@ -376,6 +429,21 @@ function rsp_record_visit()
     }
     $user_ip = rsp_get_user_ip();
     $table_name = RSP_PLUGIN_TABLE;
+
+    // Row cap — prevents unbounded table growth on high-traffic sites.
+    // Count is cached for 5 minutes to avoid a COUNT(*) on every request.
+    // Source: https://developer.wordpress.org/reference/functions/get_transient/
+    $max_rows = apply_filters('rsp_max_table_rows', RSP_MAX_TABLE_ROWS);
+    $max_rows = rsp_validate_positive_integer($max_rows, RSP_MAX_TABLE_ROWS);
+    $row_count = get_transient('rsp_table_row_count');
+    if ($row_count === false) {
+        $row_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table_name}`");
+        set_transient('rsp_table_row_count', $row_count, 5 * MINUTE_IN_SECONDS);
+    }
+    if ((int) $row_count >= $max_rows) {
+        wp_send_json_error('Table row limit reached');
+    }
+
     $now = current_time('mysql');
     $deactivate_ip_protection = (bool) intval(apply_filters('rsp_deactivate_ip_protection', get_option('rsp_deactivate_ip_protection', 0)));
     $bypass = $deactivate_ip_protection ? 1 : 0;
@@ -384,15 +452,20 @@ function rsp_record_visit()
     // Use INSERT ... ON DUPLICATE KEY UPDATE for atomicity (prevents race conditions).
     // MySQL affected rows: 1 = inserted, 2 = updated, 0 = no change (time threshold).
     // Source: https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+    //
+    // NOTE: VALUES(col) is deprecated since MySQL 8.0.20 and subject to removal.
+    // Source: https://dev.mysql.com/doc/refman/8.0/en/miscellaneous-functions.html#function_values
+    // We pass $now directly as the final %s instead of using VALUES(last_visit),
+    // which is universally compatible with MySQL 5.7+, 8.0, 8.4+, and all MariaDB versions.
     $result = $wpdb->query($wpdb->prepare(
         "INSERT INTO `{$table_name}` (page_url, user_ip, last_visit, visit_count)
          VALUES (%s, %s, %s, 1)
          ON DUPLICATE KEY UPDATE
             visit_count = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, visit_count + 1, visit_count),
-            last_visit = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, VALUES(last_visit), last_visit)",
+            last_visit = IF(%d = 1 OR TIMESTAMPDIFF(SECOND, last_visit, %s) > %d, %s, last_visit)",
         $page_url, $user_ip, $now,
         $bypass, $now, $threshold,
-        $bypass, $now, $threshold
+        $bypass, $now, $threshold, $now
     ));
 
     if ($result === false) {
@@ -429,6 +502,12 @@ function rsp_get_most_visited($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT, $urls_on
         ARRAY_A
     );
 
+    // Guard against $wpdb->get_results() returning null (e.g., query failure, custom $wpdb override).
+    // Source: https://developer.wordpress.org/reference/classes/wpdb/get_results/ — returns array|object|null.
+    if (!is_array($results)) {
+        return [];
+    }
+
     if ($urls_only) {
         $results = array_map(function ($page) {
             return (untrailingslashit($page['page_url']));
@@ -460,6 +539,9 @@ function rsp_get_urls_to_preload($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT)
     $most_visited = get_transient('rsp_most_visited_pages');
     if ($most_visited === false) {
         $most_visited = rsp_get_most_visited($number, true);
+        if (!is_array($most_visited)) {
+            $most_visited = [];
+        }
         $expiration_time = apply_filters('rsp_cached_sitemap_urls_expiration_time', RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
         $expiration_time = rsp_validate_positive_integer($expiration_time, RSP_CACHED_SITEMAP_URLS_DEFAULT_EXPIRATION_TIME);
         if (!empty($most_visited)) set_transient('rsp_most_visited_pages', $most_visited, $expiration_time);
@@ -549,6 +631,7 @@ function rsp_process_cleanup_batch()
 
     // If there are more records to delete, schedule the next batch, until $affected_rows is 0
     if ($affected_rows > 0) {
+        delete_transient('rsp_table_row_count');
         wp_schedule_single_event(time() + 60, 'rsp_batch_cleanup_task');
     }
 }

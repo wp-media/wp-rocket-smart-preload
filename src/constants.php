@@ -23,3 +23,9 @@ if (!defined('RSP_IP_PROTECTION_TIME_THRESHOLD')) {
 if (!defined('RSP_CLEANUP_THRESHOLD_TIME')) {
     define('RSP_CLEANUP_THRESHOLD_TIME', '-30 days');
 }
+if (!defined('RSP_MAX_TABLE_ROWS')) {
+    define('RSP_MAX_TABLE_ROWS', 1000000);
+}
+if (!defined('RSP_DB_VERSION')) {
+    define('RSP_DB_VERSION', '1.1.0');
+}
