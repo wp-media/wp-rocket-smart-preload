@@ -5,6 +5,7 @@
 
 ### Bug Fixes
 
+- Fix foreign URLs being recorded when site is accessed through a web proxy (host validation against `home_url()`)
 - Fix DB upgrade mechanism: replace strict `===` comparison with `version_compare()` for robust version detection across all update scenarios
 - Fix IP migration not running on plugin file-overwrite updates (now also triggered from `rsp_run_db_upgrades()`)
 - Fix missing `$wpdb->esc_like()` in `SHOW TABLES LIKE` queries to prevent wildcard matching on underscores

@@ -217,7 +217,7 @@ function rsp_fire_activation_hook_tasks()
         user_ip VARCHAR(45) NOT NULL,
         last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         visit_count BIGINT UNSIGNED DEFAULT 1,
-        PRIMARY KEY (id),
+        PRIMARY KEY  (id),
         UNIQUE KEY unique_visit (page_url(255), user_ip),
         KEY idx_last_visit (last_visit)
     ) $charset_collate;";
@@ -293,7 +293,7 @@ function rsp_run_db_upgrades()
         user_ip VARCHAR(45) NOT NULL,
         last_visit TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         visit_count BIGINT UNSIGNED DEFAULT 1,
-        PRIMARY KEY (id),
+        PRIMARY KEY  (id),
         UNIQUE KEY unique_visit (page_url(255), user_ip),
         KEY idx_last_visit (last_visit)
     ) $charset_collate;";
@@ -450,6 +450,18 @@ function rsp_record_visit()
     if ($page_url === null) {
         wp_send_json_error('Invalid page URL');
     }
+
+    // Reject URLs whose host does not match the WordPress site.
+    // This prevents recording visits from web proxies (e.g. proxysite.com)
+    // that load the page under their own domain.
+    // Source: https://developer.wordpress.org/reference/functions/wp_parse_url/
+    // Source: https://developer.wordpress.org/reference/functions/home_url/
+    $page_host = wp_parse_url($page_url, PHP_URL_HOST);
+    $site_host = wp_parse_url(home_url(), PHP_URL_HOST);
+    if ($page_host === null || $site_host === null || strcasecmp($page_host, $site_host) !== 0) {
+        wp_send_json_error('URL host mismatch');
+    }
+
     $user_ip = rsp_get_user_ip();
     $table_name = RSP_PLUGIN_TABLE;
 
