@@ -268,7 +268,18 @@ add_action('rsp_update_preload_table_task', 'rsp_prepare_preload_things_for_cust
  */
 function rsp_run_db_upgrades()
 {
-    if (get_option('rsp_db_version') === RSP_DB_VERSION) {
+    // get_option() returns false when the option does not exist (pre-1.5.0 installs).
+    // We default to '0.0.0' so version_compare() works correctly in all cases.
+    // Source: https://developer.wordpress.org/reference/functions/get_option/ — returns mixed|false.
+    $stored_version = get_option('rsp_db_version', '0.0.0');
+    if ($stored_version === false) {
+        $stored_version = '0.0.0';
+    }
+
+    // Skip if the DB schema is already at or above the current version.
+    // Uses version_compare() for proper semantic version comparison.
+    // Source: https://www.php.net/manual/en/function.version-compare.php
+    if (version_compare($stored_version, RSP_DB_VERSION, '>=')) {
         return;
     }
 
@@ -289,6 +300,16 @@ function rsp_run_db_upgrades()
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
+
+    // Migrate raw IPs to hashed format for users upgrading from pre-hashing versions.
+    // Only needed when coming from before '1.2.0' (when IP hashing was introduced).
+    // WordPress does NOT fire register_activation_hook() on plugin updates, so this
+    // is the only path that runs the migration for file-overwrite updates (FTP, etc.).
+    // Source: https://developer.wordpress.org/plugins/plugin-basics/activation-deactivation-hooks/
+    if (version_compare($stored_version, '1.2.0', '<')) {
+        rsp_migrate_raw_ips_to_hashed();
+    }
+
     update_option('rsp_db_version', RSP_DB_VERSION);
 }
 add_action('plugins_loaded', 'rsp_run_db_upgrades');

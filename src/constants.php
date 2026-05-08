@@ -27,5 +27,5 @@ if (!defined('RSP_MAX_TABLE_ROWS')) {
     define('RSP_MAX_TABLE_ROWS', 1000000);
 }
 if (!defined('RSP_DB_VERSION')) {
-    define('RSP_DB_VERSION', '1.1.0');
+    define('RSP_DB_VERSION', '1.2.0');
 }

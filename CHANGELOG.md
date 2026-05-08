@@ -5,6 +5,8 @@
 
 ### Bug Fixes
 
+- Fix DB upgrade mechanism: replace strict `===` comparison with `version_compare()` for robust version detection across all update scenarios
+- Fix IP migration not running on plugin file-overwrite updates (now also triggered from `rsp_run_db_upgrades()`)
 - Fix missing `$wpdb->esc_like()` in `SHOW TABLES LIKE` queries to prevent wildcard matching on underscores
 - Fix missing backtick escaping on `$table_name` in `rsp_get_most_visited()` and `rsp_process_cleanup_batch()` SQL queries
 - Fix unsanitized URL input in `rsp_record_visit()` — now passes through `esc_url_raw()` before storage
