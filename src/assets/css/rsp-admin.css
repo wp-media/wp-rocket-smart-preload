@@ -6,7 +6,15 @@
 }
 
 .rsp-switch input {
-    display: none;
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.rsp-switch input:focus + .rsp-slider {
+    outline: 2px solid #2196F3;
+    outline-offset: 2px;
 }
 
 .rsp-switch .rsp-slider {

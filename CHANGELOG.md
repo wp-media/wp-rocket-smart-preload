@@ -1,9 +1,13 @@
 # Changelog
 
+
 ## 1.5.0
 
 ### Bug Fixes
 
+- Fix missing `$wpdb->esc_like()` in `SHOW TABLES LIKE` queries to prevent wildcard matching on underscores
+- Fix missing backtick escaping on `$table_name` in `rsp_get_most_visited()` and `rsp_process_cleanup_batch()` SQL queries
+- Fix unsanitized URL input in `rsp_record_visit()` — now passes through `esc_url_raw()` before storage
 - Fix unbounded table growth by enforcing a configurable max row limit (`RSP_MAX_TABLE_ROWS`) (#8)
 - Fix cleanup task using correct `DateTime('now')` with WordPress timezone and re-enable batch deletion (#9)
 - Fix fatal error when `$wpdb->get_results()` returns `null` by adding `is_array()` guards (#11)
@@ -13,6 +17,10 @@
 ### Improvements
 
 
+- Add `Requires PHP: 7.3` and `Requires at least: 6.3` to plugin header
+- Add URL max length validation (2048 chars) in `rsp_sanitize_url()` with `is_string()` type guard
+- Add HTTP 403 status code to nonce-failure response in `rsp_record_visit()`
+- Fix toggle switch accessibility: replace `display: none` with visually-hidden pattern and add keyboard focus indicator
 - Update dependencies
 - Update `tsconfig.json`: change `module` from `ES2015` to `preserve` to avoid deprecated `moduleResolution: node10` default (TypeScript 6.0)
 - Expand bot detection: add 16 new bot identifiers

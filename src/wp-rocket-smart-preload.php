@@ -9,6 +9,8 @@
  * Author URI: https://wp-rocket.me/
  * License: GNU General Public License v2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
+ * Requires at least: 6.3
+ * Requires PHP: 7.3
  */
 
 // Exit if accessed directly
@@ -145,7 +147,7 @@ function rsp_prepare_preload_things_for_custom_sitemap($clear_cache = false)
     // 1 - truncate cache table upon plugin activation
     global $wpdb;
     $table_name = $wpdb->prefix . 'wpr_rocket_cache';
-    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name)) === $table_name) {
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table_name))) === $table_name) {
         $wpdb->query("TRUNCATE TABLE `{$table_name}`");
     }
 
@@ -416,14 +418,14 @@ function rsp_record_visit()
     }
     // Verify nonce
     if (!isset($_POST['nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['nonce'])), 'rsp_record_visit_nonce')) {
-        wp_send_json_error('Invalid nonce');
+        wp_send_json_error('Invalid nonce', 403);
     }
 
     if (!isset($_POST['page_url']) || empty($_POST['page_url'])) {
         wp_send_json_error('Invalid page URL');
     }
 
-    $page_url = rsp_sanitize_url(wp_unslash($_POST['page_url']));
+    $page_url = rsp_sanitize_url(esc_url_raw(wp_unslash($_POST['page_url'])));
     if ($page_url === null) {
         wp_send_json_error('Invalid page URL');
     }
@@ -496,7 +498,7 @@ function rsp_get_most_visited($number = RSP_SITEMAP_PAGE_DEFAULT_LIMIT, $urls_on
 
     $results = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT page_url, SUM(visit_count) AS total_visits FROM $table_name GROUP BY page_url ORDER BY total_visits DESC LIMIT %d",
+            "SELECT page_url, SUM(visit_count) AS total_visits FROM `{$table_name}` GROUP BY page_url ORDER BY total_visits DESC LIMIT %d",
             intval($number)
         ),
         ARRAY_A
@@ -623,7 +625,7 @@ function rsp_process_cleanup_batch()
     // Delete a batch of records
     $affected_rows = $wpdb->query(
         $wpdb->prepare(
-            "DELETE FROM $table_name WHERE last_visit < %s LIMIT %d",
+            "DELETE FROM `{$table_name}` WHERE last_visit < %s LIMIT %d",
             $threshold_date,
             $batch_size
         )
@@ -646,6 +648,9 @@ function rsp_process_cleanup_batch()
  */
 function rsp_sanitize_url($url)
 {
+    if (!is_string($url) || strlen($url) > 2048) {
+        return null;
+    }
     $parsed_url = wp_parse_url($url);
     if (!$parsed_url || !isset($parsed_url['scheme']) || !isset($parsed_url['host'])) {
         return null;
@@ -745,7 +750,7 @@ function rsp_migrate_raw_ips_to_hashed()
     $table_name = RSP_PLUGIN_TABLE;
 
     // Check if the table exists first
-    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name)) !== $table_name) {
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table_name))) !== $table_name) {
         return;
     }
 
