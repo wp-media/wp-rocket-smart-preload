@@ -12,6 +12,13 @@
 
 ### Improvements
 
+
+- Update dependencies
+- Update `tsconfig.json`: change `module` from `ES2015` to `preserve` to avoid deprecated `moduleResolution: node10` default (TypeScript 6.0)
+- Expand bot detection: add 16 new bot identifiers
+- Remove duplicated entries
+- Add explicit `: bool` return type to `is_bot()`
+- Add inline source documentation and category grouping to bot list
 - Add database upgrade mechanism (`RSP_DB_VERSION` + `rsp_run_db_upgrades()` on `plugins_loaded`)
 - Replace `in_array()` with `array_flip()` + `isset()` in preload exclusion filter for O(1) lookups
 - Batch IP migration (`rsp_migrate_raw_ips_to_hashed()`) with cursor-based pagination to prevent OOM
